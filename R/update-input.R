@@ -656,7 +656,6 @@ selectizeJSON <- function(data, req) {
   query <- parseQueryString(req$QUERY_STRING)
   # extract the query variables, conjunction (and/or), search string, maximum options
   var <- c(safeFromJSON(query$field))
-  cjn <- if (query$conju == 'and') all else any
   # all keywords in lower-case, for case-insensitive matching
   key <- unique(strsplit(tolower(query$query), '\\s+')[[1]])
   if (identical(key, '')) key <- character(0)
@@ -667,10 +666,23 @@ selectizeJSON <- function(data, req) {
   # convert a single vector to a data frame so it returns {label: , value: }
   # later in JSON; other objects return arbitrary JSON {x: , y: , foo: , ...}
   data <- if (is.atomic(data)) {
-    data.frame(label = names(choicesWithNames(data)), value = data,
-               stringsAsFactors = FALSE)
-  } else as.data.frame(data, stringsAsFactors = FALSE)
+    lab = if(is.null(names(data))) {
+      as.character(data)
+    } else {
+      lab = names(data)
+      # replace empty names like: data = c(a = 1, 2)
+      # int this case: names(data) = c("a", "")
+      # with replacement below choices will be: lab = c("a", "2")
+      empty_names_indices = lab == ""
+      lab[empty_names_indices] = as.character(data[empty_names_indices])
+      lab
+    }
 
+    data.frame(label = lab, value = data,
+               stringsAsFactors = FALSE)
+  } else {
+    as.data.frame(data, stringsAsFactors = FALSE)
+  }
   # start searching for keywords in all specified columns
   idx <- logical(nrow(data))
   if (length(key)) for (v in var) {
@@ -682,7 +694,11 @@ selectizeJSON <- function(data, req) {
     )
     # merge column matches using OR, and match multiple keywords in one column
     # using the conjunction setting (AND or OR)
-    idx <- idx | apply(matches, 1, cjn)
+    matches = rowSums(matches)
+    if(query$conju == 'and')
+      idx = idx | (matches == length(key))
+    else
+      idx = idx | matches
   }
   # only return the first n rows (n = maximum options in configuration)
   idx <- utils::head(if (length(key)) which(idx) else seq_along(idx), mop)
